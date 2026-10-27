@@ -110,7 +110,7 @@ AI 将案件整理为以下四类信息。以下内容只说明每类信息的�
 
 #### 3. 交易是否已经发生
 
-记录交易状态，并统一使用规则中的固定英文标签：`CONFIRMED`、`DENIED` 或 `UNKNOWN`。如果信息尚未核实，使用 `Pending Verification` 表示待核实状态。AI 只能根据案件描述和虚构规则进行辅助判断，不能把未经核实的内容当作确定事实。
+记录交易状态时，`Transaction Status` 只使用规则中的固定英文标签：`CONFIRMED`、`DENIED` 或 `UNKNOWN`。如果相关信息尚未核实，另行使用 `Verification Status: Pending Verification` 表示待核实状态；`Pending Verification` 不属于交易状态。AI 只能根据案件描述和虚构规则进行辅助判断，不能把未经核实的内容当作确定事实。
 
 #### 4. 案件概述
 
@@ -193,7 +193,7 @@ AI 结果不能直接作为最终行动。
 2. **紧急程度**：内部保留 P1、P2、P3，用于表示根据不同情况判定出的优先级和严重程度。原型输出中显示相应等级；同时默认显示“紧急情况”，不显示判断原因。
 3. **交易状态**：统一使用 `CONFIRMED`、`DENIED` 和 `UNKNOWN`。尚未核实的内容使用 `Pending Verification` 标记。
 4. **四类重点信息**：涉及的平台或机构、金额信息、交易状态和案件概述，是分析结果中需要提取和展示的重点信息，不只是工作流程层级。
-5. **信息质量标签**：不确定信息统一使用 `Pending Verification`；矛盾信息统一使用 `Conflict Flag`。
+5. **信息质量标签**：尚未核实的信息统一使用 `Verification Status: Pending Verification`；矛盾信息统一使用 `Conflict Flag`。`Pending Verification` 不作为 `Transaction Status` 的额外类别。
 6. **固定团队名称**：推荐路径和原型输出中纳入 Rules v4.1 定义的团队名称，包括 `Fraud / Scam Response`、`Card Fraud / Disputes`、`Payment Provider Fraud`、`Account Security`、`Trust & Safety`、`Platform Balance Support`、`Scam Messaging Reporting`、`Fraud & SIM Security`、`Identity Recovery Support`、`Scam Reporting & Case Coordination`、`Victim Support & Follow-up`、`Community Access & Practical Support` 和 `Designated Safety Contact`。具体团队根据案件涉及的机构和信息进行推荐，不表示 AI 会自动联系这些团队。
 7. **弱势情况指标**：发现弱势情况指标时显示；没有发现时不显示。相关受害者援助、社区支持和指定紧急人身安全联络路径，只在案件信息和规则支持时纳入推荐。
 
