@@ -1,0 +1,9 @@
+import { describe, expect, it } from 'vitest'
+import { localAnalyze } from './analysis'
+import { buildReport } from './report'
+describe('ScamSafe deterministic policy helpers',()=>{
+  it('routes the synthetic shopping case to card disputes and community support',()=>{const a=localAnalyze('A person found an online store, completed a card payment of AUD 280, received no confirmation and cannot use their banking app.');expect(a.priority).toBe('P1 — Immediate');expect(a.recommendations.map(x=>x.team)).toEqual(expect.arrayContaining(['Card Fraud / Disputes','Community Access & Practical Support']))})
+  it('routes bank transfer and SMS safely',()=>{expect(localAnalyze('A recent bank transfer to a suspected scam recipient.').recommendations[0].team).toBe('Fraud / Scam Response');expect(localAnalyze('Suspicious SMS, no payment or credentials.').recommendations[0].team).toBe('Scam Messaging Reporting')})
+  it('keeps uncertainty and contradictions visible',()=>{const a=localAnalyze('Paid AUD 500, maybe AUD 50; payment channel unknown.');expect(a.priority).toBe('Priority requires clarification');expect(a.conflicts.length).toBeGreaterThan(0);expect(a.clarifyingQuestions.length).toBeGreaterThan(0)})
+  it('includes employee decisions in the report',()=>{const a=localAnalyze('Suspicious SMS, no payment.');const report=buildReport(a,{...a.reviewDecisions,sms:{state:'accepted',editedAction:'Preserve and report the message.',notes:'Reviewed by employee'}});expect(report).toContain('accepted');expect(report).toContain('Reviewed by employee');expect(report).toContain('Not Sent')})
+})
