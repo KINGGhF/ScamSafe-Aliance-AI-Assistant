@@ -4,7 +4,7 @@ export type Priority = 'P1 — Immediate' | 'P2 — Priority' | 'P3 — Standard
 export type ReviewState = 'pending' | 'accepted' | 'modified' | 'rejected'
 export type RecommendationKind = 'Primary Recommendation' | 'Additional Recommendation' | 'Necessary Parallel Action' | 'Follow-up / Reporting Suggestion'
 export type AnalysisMode = 'gemini' | 'openai' | 'demo'
-export type FactOrigin = 'case_intake' | 'gemini_extracted' | 'openai_extracted' | 'rule_derived' | 'employee_correction' | 'demo_extracted'
+export type FactOrigin = 'case_intake' | 'gemini_extracted' | 'openai_extracted' | 'rule_derived' | 'employee_clarification' | 'employee_correction' | 'demo_extracted'
 export type OrganizationCategory = 'Banks and Payment Providers' | 'Digital Platforms' | 'Telecommunications Providers' | 'Identity Recovery Services' | 'Government Scam Reporting Services' | 'Victim Support Organisations' | 'Community Support Organisations' | "Reporting Organisation's Designated Emergency Safety Contact"
 export type Fact = { label: string; value: string; origin: FactOrigin; evidence?: string }
 export type Vulnerability = { title: string; evidence: string; suggestion: string; origin: FactOrigin }
@@ -13,6 +13,7 @@ export type Recommendation = {
   routingStatus: 'proposed' | 'pending_clarification'; action: string; reason: string; condition?: string; origin: 'rule_derived'
 }
 export type Decision = { state: ReviewState; editedAction: string; editedTeam?: string; notes: string }
+export type ReviewHistoryEntry = { analysisVersion: number; recommendation: Recommendation; decision: Decision }
 export type ModelExtraction = {
   summary: string
   safetyAssessment: { status: 'current_danger' | 'no_current_danger' | 'uncertain' | 'not_mentioned'; evidence: string[] }
@@ -24,7 +25,8 @@ export type ModelExtraction = {
   riskSignals: { kind: 'imminent_payment' | 'recent_payment_unprotected' | 'ongoing_unauthorised_debits' | 'credentials_disclosed_unprotected' | 'account_control_lost' | 'immediate_physical_danger' | 'immediate_self_harm'; evidence: string }[]
 }
 export type Analysis = {
-  caseId: string; mode: AnalysisMode; originalNarrative: string; workerClarifications: string; employeeCorrections: string
+  caseId: string; mode: AnalysisMode; analysisVersion: number; originalNarrative: string; workerClarifications: string; employeeCorrections: string
+  policyVersion: string; model: string | null
   summary: string; summaryOrigin: 'gemini_extracted' | 'openai_extracted' | 'case_intake' | 'demo_extracted'; caseTypes: CaseType[]; reportedFacts: Fact[]
   priority: Priority; priorityRule: string; priorityEvidence: string[]; interimAction: string
   safetyReviewRequired: boolean; safetyReviewMessage: string

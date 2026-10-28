@@ -30,6 +30,8 @@ describe('recommendation review workflow',()=>{
     await act(async()=>root!.render(<App/>))
     await click('Immediate safety concern')
     await click('Analyse Case')
+    expect(document.body.textContent).toContain('Limited Demo Mode')
+    expect(document.body.textContent).toContain('not full semantic AI analysis')
     expect(document.body.textContent).toContain('P1 — Immediate')
     await click('Continue with current information')
     expect(document.querySelector('[data-recommendation-id="safety"]')).not.toBeNull()
@@ -37,6 +39,9 @@ describe('recommendation review workflow',()=>{
     let card=document.querySelector('[data-recommendation-id="safety"]')!
     expect(card.textContent).toContain('Accepted · not sent')
     expect(card.textContent).toContain('Immediately escalate the reported personal safety threat')
+    await click('Review analysis')
+    await click('Continue with current information')
+    expect(document.querySelector('[data-recommendation-id="safety"]')?.textContent).toContain('Accepted · not sent')
     await click('Change Decision')
     await click('Modify')
     const action=document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Modified proposed action"]')!
@@ -58,5 +63,46 @@ describe('recommendation review workflow',()=>{
     expect(document.body.textContent).toContain('Original recommendation: Immediately escalate the reported personal safety threat')
     expect(document.body.textContent).toContain('Employee-modified action: Escalate under the employee safety procedure now.')
     expect(document.body.textContent).toContain('Original justification: The person reports a credible current or imminent personal safety danger.')
+  })
+
+  it('labels Real AI Mode only after a successful structured provider response',async()=>{
+    const extraction={summary:'The person reports a current safety threat.',safetyAssessment:{status:'current_danger',evidence:['the person reports being in immediate danger']},caseTypes:[],facts:[],missingInformation:[],conflicts:[],vulnerabilityIndicators:[],riskSignals:[]}
+    vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>String(input).includes('/api/status')
+      ? {ok:true,json:async()=>({configuredProvider:'gemini',policyVersion:'1.0'})}
+      : {ok:true,json:async()=>({mode:'gemini',analysisMode:'real_ai',requestStatus:'succeeded',provider:'gemini',model:'mock-gemini-structured',policyVersion:'1.0',analysis:extraction})}))
+    host=document.createElement('div'); document.body.append(host); root=createRoot(host)
+    await act(async()=>root!.render(<App/>))
+    expect(document.body.textContent).toContain('Analysis not run')
+    await click('Immediate safety concern')
+    await click('Analyse Case')
+    expect(document.body.textContent).toContain('Real AI Mode · Gemini')
+    expect(document.body.textContent).toContain('P1 — Immediate')
+  })
+
+  it('keeps an older employee decision in report history when updated facts replace its recommendation',async()=>{
+    vi.stubGlobal('fetch',vi.fn(async(input:RequestInfo|URL)=>String(input).includes('/api/status')
+      ? {ok:true,json:async()=>({configuredProvider:'demo',policyVersion:'1.0'})}
+      : {ok:false,json:async()=>({mode:'demo',error:'AI unavailable'})}))
+    host=document.createElement('div'); document.body.append(host); root=createRoot(host)
+    await act(async()=>root!.render(<App/>))
+    await click('Immediate safety concern')
+    await click('Analyse Case')
+    await click('Continue with current information')
+    await click('Accept')
+    await click('Review analysis')
+    await click('Back to intake')
+    const description=document.querySelector<HTMLTextAreaElement>('textarea')!
+    await act(async()=>{
+      const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!
+      setter.call(description,'A person received a suspicious SMS but did not click, pay, or disclose information.')
+      description.dispatchEvent(new Event('input',{bubbles:true}))
+    })
+    await click('Analyse Case')
+    await click('Continue with current information')
+    expect(document.querySelector('[data-recommendation-id="safety"]')).toBeNull()
+    await click('Generate Case Report')
+    expect(document.body.textContent).toContain('Superseded Recommendations / Review History')
+    expect(document.body.textContent).toContain('Employee decision: accepted')
+    expect(document.body.textContent).toContain('Immediately escalate the reported personal safety threat')
   })
 })

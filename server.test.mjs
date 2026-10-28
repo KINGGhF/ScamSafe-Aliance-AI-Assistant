@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { analysisMode, validateModelShape } from './server.mjs'
+import { analysisMode, loadBusinessPolicy, validateModelShape } from './server.mjs'
 
 const validExtraction = {
   summary: 'A person reported a suspicious contact.',
@@ -13,6 +13,13 @@ const validExtraction = {
 }
 
 describe('Model server safeguards', () => {
+  it('loads Policy 1.0 from the sole authoritative Markdown file', async () => {
+    const policy=await loadBusinessPolicy()
+    expect(policy.version).toBe('1.0')
+    expect(policy.text).toContain('唯一生效的业务决策政策')
+    expect(policy.text).toContain('R1 — 理解当事人报告的事实')
+  })
+
   it('defaults to Gemini per Rules v4.2 and supports explicitly selected OpenAI', () => {
     expect(analysisMode({})).toBe('demo')
     expect(analysisMode({ GEMINI_API_KEY: 'configured' })).toBe('gemini')
