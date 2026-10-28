@@ -1,24 +1,76 @@
 import http from 'node:http'
+import { pathToFileURL } from 'node:url'
 import { createServer as createViteServer } from 'vite'
-const port = Number(process.env.PORT || 5173)
-const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' })
-const policy = `You are a ScamSafe Alliance decision-support assistant for authorised frontline workers. Use synthetic cases only. Never confirm a scam, never claim to have verified records or contacted anyone, and never request passwords, OTPs, CVVs, full transaction IDs or identity numbers. Summarise only the text under ORIGINAL CASE INTAKE, in one concise paragraph, using only facts stated there. Employee clarification and correction text may update risk interpretation and recommendations but must not be added to the original-case summary. Do not invent threats, losses, transactions, institutions, routes or protective actions. Keep missing information, conflicts and follow-up questions in their own fields. PAYMENT ROUTE: assign one only when explicit narrative evidence identifies the rail. The verb transferred, transfer, paid or sent money establishes at most that a payment is reported as completed; it does not establish bank transfer, card, wallet or platform balance. For a reported payment with unknown route, leave route Not specified, list missing route and protective-action status, and provide ONE provisional recommendation to contact the institution responsible for the payment. Give conditional routes: Bank transfer → Banks and Payment Providers / Fraud / Scam Response; Card payment → Banks and Payment Providers / Card Fraud / Disputes; Payment wallet → Banks and Payment Providers / Payment Provider Fraud; Platform balance → Digital Platforms / Platform Balance Support. Do not choose one condition until route evidence is present. A recent suspected scam-related payment with unknown protective action can be P1; unresolved missing information must not block the provisional urgent recommendation. Use transaction wording 'Reported as completed' when the person reports completion; do not claim independent confirmation. Ask whether the relevant institution has been contacted or what protective action it has taken only when that remains unknown. Return JSON with caseId, originalNarrative, workerClarifications, summary, caseTypes, reportedFacts [{label,value}], priority, interimAction, vulnerabilityIndicators [{title,evidence,suggestion}], missingInfo, conflicts, pendingVerification, clarifyingQuestions (max 3), recommendations [{id,kind,organisation,team,action,reason,condition?}], reviewDecisions. Use approved teams only when route evidence supports them. Allowed targets: Banks and Payment Providers (Fraud / Scam Response, Card Fraud / Disputes, Payment Provider Fraud, Account Security); Digital Platforms (Trust & Safety, Account Security, Platform Balance Support); Telecommunications Providers (Scam Messaging Reporting, Fraud & SIM Security); Identity Recovery Services (Identity Recovery Support); Government Scam Reporting Services (Scam Reporting & Case Coordination); Victim Support Organisations (Victim Support & Follow-up); Community Support Organisations (Community Access & Practical Support); The reporting organisation's Designated Emergency Safety Contact (Designated Safety Contact).`
-const body = req => new Promise((resolve,reject)=>{let s='';req.on('data',x=>s+=x);req.on('end',()=>resolve(s));req.on('error',reject)})
-const send = (res,status,data) => { res.writeHead(status,{'content-type':'application/json'}); res.end(JSON.stringify(data)) }
-const server = http.createServer(async (req,res)=>{
-  if(req.url==='/api/status'&&req.method==='GET') return send(res,200,{mode:process.env.OPENAI_API_KEY?'real_ai':'demo'})
-  if(req.url==='/api/analyze'&&req.method==='POST'){
-    if(!process.env.OPENAI_API_KEY) return send(res,503,{error:'OPENAI_API_KEY is not configured; use Local Rule-Based Demo Mode.'})
-    try {
-      const input=JSON.parse(await body(req))
-      const prompt=`${policy}\nCase ID: ${input.caseId}\nORIGINAL CASE INTAKE:\n${input.narrative}\nEMPLOYEE CLARIFICATION (use only to update interpretation; do not add it to the summary):\n${input.clarification||'None'}\nEMPLOYEE CORRECTION (use only to update interpretation; do not add it to the summary):\n${input.correction||'None'}`
-      const upstream=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${process.env.OPENAI_API_KEY}`},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-4.1-mini',input:prompt,text:{format:{type:'json_object'}}})})
-      const data=await upstream.json()
-      if(!upstream.ok)return send(res,502,{error:'Model provider error'})
-      const raw=data.output_text||data.output?.flatMap(x=>x.content||[]).find(x=>x.type==='output_text')?.text
-      return send(res,200,{analysis:JSON.parse(raw),mode:'real_ai'})
-    } catch { return send(res,502,{error:'AI response unavailable or malformed; use the transparent fallback.'}) }
+
+export const analysisMode = env => {
+  const provider=(env.AI_PROVIDER||'gemini').toLowerCase()
+  return provider==='gemini'&&env.GEMINI_API_KEY?.trim()?'gemini':provider==='openai'&&env.OPENAI_API_KEY?.trim()?'openai':'demo'
+}
+const required = (obj, keys) => obj !== null && typeof obj === 'object' && !Array.isArray(obj) && keys.every(k=>k in obj) && Object.keys(obj).every(k=>keys.includes(k))
+const enumOf = (value, values) => typeof value === 'string' && values.includes(value)
+export function validateModelShape(x) {
+  if (!required(x,['summary','safetyAssessment','caseTypes','facts','missingInformation','conflicts','vulnerabilityIndicators','riskSignals']) || typeof x.summary!=='string' || x.summary.length>900) return false
+  const bounded = [x.caseTypes,x.facts,x.missingInformation,x.conflicts,x.vulnerabilityIndicators,x.riskSignals]
+  if (bounded.some(v=>!Array.isArray(v))) return false
+  if (!required(x.safetyAssessment,['status','evidence']) || !enumOf(x.safetyAssessment.status,['current_danger','no_current_danger','uncertain','not_mentioned']) || !Array.isArray(x.safetyAssessment.evidence) || !x.safetyAssessment.evidence.every(e=>typeof e==='string')) return false
+  if (x.caseTypes.some(v=>!required(v,['value','evidence']) || !enumOf(v.value,['Suspicious scam contact','Suspected Financial Loss','Possible identity or account credential disclosure']) || typeof v.evidence!=='string')) return false
+  const factKeys=['payment_route','transaction_status','amount','contact_channel','credential_disclosure','account_control','authorization','institution_contact','protective_action']
+  if (x.facts.some(v=>!required(v,['key','value','evidence','certainty']) || !enumOf(v.key,factKeys) || typeof v.value!=='string' || typeof v.evidence!=='string' || !enumOf(v.certainty,['reported','possible','unclear']))) return false
+  const missingKeys=['payment_route','transaction_status','institution_contact','protective_action','authorization','credential_type','current_account_access','contact_channel','other']
+  if (x.missingInformation.some(v=>!required(v,['key','reason','question']) || !enumOf(v.key,missingKeys) || typeof v.reason!=='string' || typeof v.question!=='string' || !v.question.trim().endsWith('?') || /password|passcode|one.time|otp|cvv|cvc|full card number|account number/i.test(v.question))) return false
+  const conflictKeys=['payment_route','amount','transaction_status','authorization','identity_or_credentials','contact_channel','other']
+  if (x.conflicts.some(v=>!required(v,['topic','statements','evidence','explanation']) || !enumOf(v.topic,conflictKeys) || !Array.isArray(v.statements) || !Array.isArray(v.evidence) || v.statements.length<2 || !v.statements.every(s=>typeof s==='string') || !v.evidence.every(e=>typeof e==='string') || typeof v.explanation!=='string')) return false
+  const vulnerabilityKeys=['severe_emotional_distress','language_barrier','digital_access','accessibility','essential_needs']
+  if (x.vulnerabilityIndicators.some(v=>!required(v,['kind','evidence']) || !enumOf(v.kind,vulnerabilityKeys) || typeof v.evidence!=='string')) return false
+  const riskKeys=['imminent_payment','recent_payment_unprotected','ongoing_unauthorised_debits','credentials_disclosed_unprotected','account_control_lost','immediate_physical_danger','immediate_self_harm']
+  return !x.riskSignals.some(v=>!required(v,['kind','evidence']) || !enumOf(v.kind,riskKeys) || typeof v.evidence!=='string')
+}
+
+const extractionSchema = {
+  type:'OBJECT', required:['summary','safetyAssessment','caseTypes','facts','missingInformation','conflicts','vulnerabilityIndicators','riskSignals'], additionalProperties:false,
+  properties:{
+    summary:{type:'STRING',description:'One concise paragraph grounded only in ORIGINAL CASE INTAKE; do not add facts or verification.'},
+    safetyAssessment:{type:'OBJECT',required:['status','evidence'],additionalProperties:false,properties:{status:{type:'STRING',enum:['current_danger','no_current_danger','uncertain','not_mentioned'],description:'Semantically assess current or imminent physical danger or explicit immediate self-harm risk. Account for negation, historical events, hypotheticals, quoted speech, person affected and timing.'},evidence:{type:'ARRAY',items:{type:'STRING',description:'Exact evidence from the case narrative; use an empty array only when no safety concern is mentioned.'}}}},
+    caseTypes:{type:'ARRAY',items:{type:'OBJECT',required:['value','evidence'],additionalProperties:false,properties:{value:{type:'STRING',enum:['Suspicious scam contact','Suspected Financial Loss','Possible identity or account credential disclosure']},evidence:{type:'STRING',description:'Exact short quote from a supplied source.'}}}},
+    facts:{type:'ARRAY',items:{type:'OBJECT',required:['key','value','evidence','certainty'],additionalProperties:false,properties:{key:{type:'STRING',enum:['payment_route','transaction_status','amount','contact_channel','credential_disclosure','account_control','authorization','institution_contact','protective_action']},value:{type:'STRING'},evidence:{type:'STRING',description:'Exact short quote from a supplied source.'},certainty:{type:'STRING',enum:['reported','possible','unclear']}}}},
+    missingInformation:{type:'ARRAY',items:{type:'OBJECT',required:['key','reason','question'],additionalProperties:false,properties:{key:{type:'STRING',enum:['payment_route','transaction_status','institution_contact','protective_action','authorization','credential_type','current_account_access','contact_channel','other']},reason:{type:'STRING'},question:{type:'STRING',description:'A direct, safe question to ask the employee/reporting person.'}}}},
+    conflicts:{type:'ARRAY',items:{type:'OBJECT',required:['topic','statements','evidence','explanation'],additionalProperties:false,properties:{topic:{type:'STRING',enum:['payment_route','amount','transaction_status','authorization','identity_or_credentials','contact_channel','other']},statements:{type:'ARRAY',items:{type:'STRING'}},evidence:{type:'ARRAY',items:{type:'STRING'}},explanation:{type:'STRING'}}}},
+    vulnerabilityIndicators:{type:'ARRAY',items:{type:'OBJECT',required:['kind','evidence'],additionalProperties:false,properties:{kind:{type:'STRING',enum:['severe_emotional_distress','language_barrier','digital_access','accessibility','essential_needs']},evidence:{type:'STRING',description:'Exact short quote showing a stated need.'}}}},
+    riskSignals:{type:'ARRAY',items:{type:'OBJECT',required:['kind','evidence'],additionalProperties:false,properties:{kind:{type:'STRING',enum:['imminent_payment','recent_payment_unprotected','ongoing_unauthorised_debits','credentials_disclosed_unprotected','account_control_lost','immediate_physical_danger','immediate_self_harm']},evidence:{type:'STRING',description:'Exact short quote supporting a possible risk; rules engine independently validates it.'}}}},
   }
-  vite.middlewares(req,res)
-})
-server.listen(port,()=>console.log(`ScamSafe running at http://localhost:${port}`))
+}
+const toOpenAISchema = value => Array.isArray(value) ? value.map(toOpenAISchema) : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key,child])=>[key,key==='type'&&typeof child==='string'?child.toLowerCase():toOpenAISchema(child)])) : value
+
+const policy = `You are the ScamSafe Alliance information extraction component for authorised frontline workers using synthetic case examples only. Follow Rules v4.2 R1-R5. Extract only reported facts. Do not diagnose, independently verify, choose P1-P3, name a receiving team, or create a recommendation; deterministic rules do that. Never treat a reported payment as institution-verified. The phrase 'transferred' alone does not identify bank transfer. Return only the requested structured fields. Summary: one concise paragraph based only on ORIGINAL CASE INTAKE. Preserve uncertainty, contradictions, and explicit negation. Do not turn 'not suicidal' into a safety risk, 'banking app' into a credential disclosure, or general 'need help' into vulnerability. For safetyAssessment, semantically decide whether the affected person faces current/imminent danger, explicitly does not, has only a historical ended threat, describes a future hypothetical, or leaves timing unclear. Distinguish negation, reported speech, quoted or hypothetical statements, person affected, and timing. Use current_danger only for a supported present/imminent threat or explicit immediate self-harm danger; use uncertain when a credible cue exists but current status is unclear; no_current_danger for a clear negation or ended historical threat; not_mentioned when there is no safety cue. Quote exact, concise evidence spans. Keep employee clarification and employee correction separate from original intake; a clear correction may supersede an extraction, while uncertainty or conflict must remain visible. Missing information must be decision-critical. Clarifying questions must be direct questions ending in '?', incident-specific, and must never ask for passwords, OTPs, complete card numbers, CVV, or account numbers. Do not infer facts, institutions, amounts, payment route, or protective action.`
+const readBody = req => new Promise((resolve,reject)=>{let s='';req.on('data',c=>s+=c);req.on('end',()=>resolve(s));req.on('error',reject)})
+const send = (res,status,data) => {res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(data))}
+
+export async function createAppServer({env=process.env, fetchImpl=fetch}={}) {
+  const vite=await createViteServer({server:{middlewareMode:true},appType:'spa'})
+  return http.createServer(async(req,res)=>{
+    if(req.url==='/api/status'&&req.method==='GET') return send(res,200,{mode:analysisMode(env)})
+    if(req.url==='/api/analyze'&&req.method==='POST'){
+      const provider=analysisMode(env)
+      if(provider==='demo') return send(res,503,{mode:'demo',error:'The selected AI provider is not configured. Limited Demo Mode is active.'})
+      try {
+        const input=JSON.parse(await readBody(req))
+        if(typeof input.narrative!=='string'||!input.narrative.trim()) return send(res,400,{error:'A case narrative is required.'})
+        const prompt=`${policy}\nORIGINAL CASE INTAKE:\n${input.narrative}\nEMPLOYEE CLARIFICATION (separate reported follow-up):\n${input.clarification||'None'}\nEMPLOYEE CORRECTION (employee-authored correction; preserve conflicting statements unless clearly authoritative):\n${input.correction||'None'}`
+        const upstream=provider==='gemini'
+          ? await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(env.GEMINI_MODEL||'gemini-3.8-flash')}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':env.GEMINI_API_KEY},body:JSON.stringify({systemInstruction:{parts:[{text:policy}]},contents:[{role:'user',parts:[{text:prompt}]}],generationConfig:{temperature:0.1,responseMimeType:'application/json',responseJsonSchema:extractionSchema}})})
+          : await fetchImpl('https://api.openai.com/v1/responses',{method:'POST',headers:{'content-type':'application/json','authorization':`Bearer ${env.OPENAI_API_KEY}`},body:JSON.stringify({model:env.OPENAI_MODEL||'gpt-6-astra',store:false,instructions:policy,input:prompt,text:{format:{type:'json_schema',name:'scamsafe_case_extraction',strict:true,schema:toOpenAISchema(extractionSchema)}}})})
+        const payload=await upstream.json()
+        if(!upstream.ok) return send(res,502,{mode:'demo',error:`${provider} was unavailable; use Limited Demo Mode.`})
+        const raw=provider==='gemini' ? payload.candidates?.[0]?.content?.parts?.map(part=>part.text||'').join('') : payload.output?.flatMap(item=>item.content||[]).filter(content=>content.type==='output_text').map(content=>content.text||'').join('')
+        const extraction=raw?JSON.parse(raw):null
+        if(!validateModelShape(extraction)) return send(res,502,{mode:'demo',error:`${provider} returned invalid structured data; use Limited Demo Mode.`})
+        return send(res,200,{mode:provider,analysis:extraction})
+      } catch { return send(res,502,{mode:'demo',error:'AI response could not be validated; use Limited Demo Mode.'}) }
+    }
+    vite.middlewares(req,res)
+  })
+}
+
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const port=Number(process.env.PORT||5173); const server=await createAppServer(); server.listen(port,()=>console.log(`ScamSafe running at http://localhost:${port} (${analysisMode(process.env)} mode)`))
+}
