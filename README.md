@@ -1,6 +1,6 @@
 # ScamSafe Alliance Frontline AI Assistant
 
-React + TypeScript + Vite prototype for authorised frontline workers. OpenAI extracts narrative facts and uncertainty; a deterministic ScamSafe rules engine applies priorities, routing, and recommendations. It supports per-recommendation human review and assembles an unsent case report. It does not send messages, create referrals, freeze funds, modify accounts, or contact real institutions.
+React + TypeScript + Vite prototype for authorised frontline workers. Gemini extracts narrative facts and uncertainty by default; a deterministic ScamSafe rules engine applies priorities, routing, and recommendations. It supports per-recommendation human review and assembles an unsent case report. It does not send messages, create referrals, freeze funds, modify accounts, or contact real institutions.
 
 ## Start
 
@@ -37,4 +37,3 @@ pnpm run typecheck
 pnpm run build
 ```
 
-The requested `docs/*.md` files were absent from the project directory. The available `ScamSafe_Codex_Build_Prompt.md`, `AI_Assistant_Workflow_Chinese.md`, and the available v4.1 Word rules document were used as references.
